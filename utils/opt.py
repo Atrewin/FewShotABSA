@@ -213,6 +213,8 @@ def model_args(parser):
                        help='transition matrix FROM LABEL scaler, such as re-scale the value to non-negative')
     group.add_argument("--label_trans_scale_r", default=1, type=float, help="Scale transition FROM LABEL to x times")
 
+    group.add_argument('-mk_tr', "--mask_transition", default=False, action='store_true',
+                       help="Block out-of domain transitions.")
     group.add_argument("--add_transition_rules", default=False, action='store_true', help="Block invalid transitions.")
 
     group = parser.add_argument_group('Loss')

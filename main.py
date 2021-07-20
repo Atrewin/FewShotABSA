@@ -27,21 +27,21 @@ logger = logging.getLogger(__name__)
 
 def get_training_dataloader(opt, data_loader, preprocessor):
     """ prepare feature and data """
-    train_data_loader = data_loader.load_data(opt.train_path, preprocessor, opt, opt.train_batch_size)
-    dev_data_loader = data_loader.load_data(opt.test_path, preprocessor, opt, opt.test_batch_size)
+    train_data_loader, train_trans_mat = data_loader.load_data(opt.train_path, preprocessor, opt, opt.train_batch_size)
+    dev_data_loader, dev_trans_mat = data_loader.load_data(opt.test_path, preprocessor, opt, opt.test_batch_size)
 
     logger.info(' Finish train dev dataloader ')
 
-    return train_data_loader, dev_data_loader
+    return train_data_loader, train_trans_mat, dev_data_loader, dev_trans_mat
 
 
 def get_testing_dataloader(opt, data_loader, preprocessor):
     """ prepare feature and data """
     # @jiuhui 为什么还是training的path
-    test_data_loader = data_loader.load_data(opt.train_path, preprocessor, opt, opt.test_batch_size)
+    test_data_loader, test_trans_mat = data_loader.load_data(opt.test_path, preprocessor, opt, opt.test_batch_size)
     logger.info(' Finish test dataloader ')
 
-    return test_data_loader
+    return test_data_loader, test_trans_mat
 
 
 def main():
@@ -55,6 +55,7 @@ def main():
 
     ''' device & environment '''
     device, n_gpu = set_device_environment(opt)
+    opt.device = device
     os.makedirs(opt.output_dir, exist_ok=True)
     logger.info("Environment: device {}, n_gpu {}".format(device, n_gpu))
 
@@ -64,22 +65,41 @@ def main():
     sent_label2id, sent_id2label = make_sent_dict()
     opt.sent_label2id = sent_label2id
     opt.sent_id2label = sent_id2label
+    opt.num_tags = len(sent_label2id)
+
     word_label2id, word_id2label = make_word_dict()
     opt.word_label2id = word_label2id
     opt.word_id2label = word_id2label
-    boundary_label2id, boundary_id2label = make_boundary_dict()
-    opt.boundary_label2id = boundary_label2id
-    opt.boundary_id2label = boundary_id2label
+
+    #for tansfer error
+    opt.train_trans_mat = None
+    opt.dev_trans_mat = None
+    opt.test_trans_mat = None
+
     if opt.do_train:
-        train_data_loader, dev_data_loader = \
+        train_data_loader, train_trans_mat, dev_data_loader, dev_trans_mat = \
             get_training_dataloader(opt, data_loader, preprocessor)
+        # todo: remove the train label mask out of opt.
+        if opt.mask_transition:
+            # opt.train_label_mask = make_label_mask(opt, opt.train_path, sent_label2id)
+            # opt.dev_label_mask = make_label_mask(opt, opt.dev_path, sent_label2id)# 这是联合分布矩阵的扩张方式
+            opt.train_trans_mat = [torch.Tensor(item).to(device) for item in train_trans_mat]
+            opt.dev_trans_mat = [torch.Tensor(item).to(device) for item in dev_trans_mat]
     else:
         train_data_loader, dev_data_loader = [None] * 2
+        if opt.mask_transition:
+            opt.train_label_mask = None
+            opt.dev_label_mask = None
 
     if opt.do_predict:
-        test_data_loader = get_testing_dataloader(opt, data_loader, preprocessor)
+        test_data_loader, test_trans_mat = get_testing_dataloader(opt, data_loader, preprocessor)
+        if opt.mask_transition:
+            # opt.test_label_mask = make_label_mask(opt, opt.test_path, sent_label2id)
+            opt.test_trans_mat = [torch.Tensor(item).to(device) for item in test_trans_mat]
     else:
         test_data_loader = [None] * 1
+        if opt.mask_transition:
+            opt.test_label_mask = None
 
 
     # ''' over fitting test '''
@@ -100,13 +120,14 @@ def main():
             opt = training_model.opt
             opt.warmup_epoch = -1
         else:
-            training_model = make_model(opt)
+            training_model = make_model(opt, num_tags=len(sent_label2id), trans_r=1)
         training_model = prepare_model(opt, training_model, device, n_gpu)##有并行逻辑
-
+        #TODO get optimizer
         # prepare a set of name subseuqence/mark to use different learning rate for part of params
-        upper_structures = ['span_detector', 'scale_rate', 'span_cls', 'crf', 'biaffine', 'char_embed']  # a set of parameter name subseuqence/mark
+        upper_structures =  ['backoff', 'scale_rate', 'f_theta', 'phi', 'start_reps', 'end_reps', 'biaffine']  # a set of parameter name subseuqence/mark
         param_to_optimize, optimizer, scheduler = prepare_optimizer(opt, training_model, upper_structures)
 
+        #TODO encapsulation training process
         tester = tester_class(opt, device, n_gpu)
         trainer = trainer_class(opt, optimizer, scheduler, param_to_optimize, device, n_gpu, tester=tester)
         if opt.warmup_epoch > 0:

@@ -159,46 +159,59 @@ class PrototypeSimilarityScorer(SimilarityScorerBase):
             label_reps: torch.Tensor = None, ) -> torch.Tensor:
         """
             calculate similarity between token and each label's prototype.
-            :param test_reps: (batch_size, support_size, test_seq_len, dim)
-            :param support_reps: (batch_size, support_size, support_seq_len)
-            :param test_output_mask: (batch_size, test_seq_len)
+            :param test_reps: (batch_size, support_size, test_seq_len, dim) #@ (batch_size*query_size, support_size, test_seq_len, dim)
+            :param support_reps: (batch_size, support_size, support_seq_len) #@ (batch_size, support_size, support_seq_len, dim)
+            :param test_output_mask: (batch_size, test_seq_len) #@ (batch_size, query_size, test_seq_len)
             :param support_output_mask: (batch_size, support_size, support_seq_len)
-            :param support_targets: one-hot label targets: (batch_size, support_size, support_seq_len, num_tags)
-            :param label_reps: (batch_size, num_tags, dim)
+            :param support_targets: one-hot label targets: (batch_size, support_size, support_seq_len, num_tags) #@ (batch_size, support_size, support_seq_len)
+            :param label_reps: (batch_size, num_tags, dim) #@None
             :return: similarity: (batch_size, test_seq_len, num_tags)
         """
         support_size = support_reps.shape[1]
         test_len = test_reps.shape[-2]  # non-word-piece max test token num, Notice that it's different to input t len
         support_len = support_reps.shape[-2]  # non-word-piece max test token num or possible lb num for sc (fix `1`)
         emb_dim = test_reps.shape[-1]
-        batch_size = test_reps.shape[0]
-        num_tags = support_targets.shape[-1]
+        batch_size = support_reps.shape[0] # test_reps 的batch_size = batch_size*query_size 含义不一致
+        num_tags = support_targets.shape[-1] #@jinhui no_pad_num_tag setting
 
         # average test representation over support set (reps for each support sent can be different)
-        test_reps = torch.mean(test_reps, dim=1)  # shape (batch_size, sent_len, emb_dim)
+        test_reps = torch.mean(test_reps, dim=1)  # shape (batch_size*query, sent_len, emb_dim)
         # flatten dim mention of support size and batch size.
         # shape (batch_size * support_size, sent_len, emb_dim)
         support_reps = support_reps.view(-1, support_len, emb_dim)
         # shape (batch_size * support_size, sent_len, num_tags)
-        support_targets = support_targets.view(batch_size * support_size, support_len, num_tags).float()
+        support_targets = support_targets.view(-1, support_len, num_tags).float()
         # get prototype reps
-        # shape (batch_size, support_size, num_tags, emd_dim)
-        sum_reps = torch.bmm(torch.transpose(support_targets, -1, -2), support_reps)
+        # shape (batch_size*support_size, num_tags, emd_dim)
+        sum_reps = torch.bmm(torch.transpose(support_targets, -1, -2), support_reps)# @jinhui 疑惑 不用去平均吗？ 在下面
         # sum up tag emb over support set, shape (batch_size, num_tags, emd_dim)
-        sum_reps = torch.sum(sum_reps.view(batch_size, support_size, num_tags, emb_dim), dim=1)
+        sum_reps = torch.sum(sum_reps.view(-1, support_size, num_tags, emb_dim), dim=1)
         # get num of each tag in support set, shape: (batch_size, num_tags, 1)
         tag_count = torch.sum(support_targets.view(batch_size, -1, num_tags), dim=1).unsqueeze(-1)
         tag_count = self.remove_0(tag_count)
 
         prototype_reps = torch.div(sum_reps, tag_count)  # shape (batch_size, num_tags, emd_dim)
 
-        # calculate dot product
+        # shape (batch_size, query_size, sent_len, dim)# must be 3D
+        # test_reps = test_reps.reshape(batch_size,-1, test_len, emb_dim)
+
+        # enpend to (batch_size, query_size, num_tags, dim)
+        expand_shape = list(prototype_reps.unsqueeze_(1).shape)
+        query_size = int(test_reps.shape[0]/batch_size)
+        expand_shape[1] = query_size
+        prototype_reps = prototype_reps.expand(expand_shape)
+
+        # shape (batch_size*query_size, num_tags, dim)
+        prototype_reps = prototype_reps.reshape(-1,num_tags,emb_dim)
+
+        # calculate dot product  #@jinhui # test_reps 的batch_size = batch_size*query_size 含义不一致
         sim_score = self.sim_func(test_reps, prototype_reps)  # shape (batch_size, sent_len, num_tags)
 
         return sim_score
 
     def remove_0(self, my_tensor):
         return my_tensor + 0.0001
+
 
 
 class ProtoWithLabelSimilarityScorer(SimilarityScorerBase):

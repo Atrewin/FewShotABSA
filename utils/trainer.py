@@ -110,7 +110,7 @@ class TrainerBase:
                 if self.n_gpu == -1:#if self.n_gpu == 1:#不明白为什么单GPU的时候需要这个来处理？
                     batch = tuple(t.to(self.device) for t in batch)  # multi-gpu does scattering it-self
                 ''' loss '''
-                loss = self.do_forward(batch, model, epoch_id, step)
+                loss = self.do_forward(batch, model, epoch_id, step)# loss 后面*(-1)是怎么回事？
                 loss = self.process_special_loss(loss)  # for parallel process, split batch and so on
                 loss.backward()
                 exit()

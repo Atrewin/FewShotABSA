@@ -336,7 +336,78 @@ class BertSeparateContextEmbedder(BertContextEmbedder):
         support_reps = support_reps.view(batch_size, support_size, -1, reps_size)
         return test_reps.contiguous(), support_reps.contiguous()
 
+class BertSchemaContextEmbedder(BertContextEmbedder):
+    def __init__(self, opt):
+        super(BertSchemaContextEmbedder, self).__init__(opt)
 
+    def forward(
+            self,
+            test_token_ids: torch.Tensor,
+            test_segment_ids: torch.Tensor,
+            test_nwp_index: torch.Tensor,
+            test_input_mask: torch.Tensor,
+            support_token_ids: torch.Tensor = None,
+            support_segment_ids: torch.Tensor = None,
+            support_nwp_index: torch.Tensor = None,
+            support_input_mask: torch.Tensor = None,
+            reps_type: str = 'test_support',
+    ) -> (torch.Tensor, torch.Tensor):
+        """
+        get context representation
+        :param test_token_ids: (batch_size, test_len)
+        :param test_segment_ids: (batch_size, test_len)
+        :param test_nwp_index: (batch_size, test_len, 1)
+        :param test_input_mask: (batch_size, test_len)
+        :param support_token_ids: (batch_size, support_size, support_len)
+        :param support_segment_ids: (batch_size, support_size, support_len)
+        :param support_nwp_index: (batch_size, support_size, support_len, 1)
+        :param support_input_mask: (batch_size, support_size, support_len)
+        :param reps_type: select the reps type, default: reps for test and support tokens. Special choice is for label
+        :return:
+            if do concatenating representation:
+                return (test_reps, support_reps):  all their shape are (batch_size, support_size, nwp_sent_len, emb_len)
+            else do representation for a single model:
+                return test_reps, shape is (batch_size, nwp_sent_len, emb_len)
+        """
+        batch_size = test_token_ids.shape[0]
+        if reps_type == 'test_support':
+            if support_token_ids is not None:
+                return self.concatenating_reps(
+                    test_token_ids, test_segment_ids, test_nwp_index, test_input_mask,
+                    support_token_ids, support_segment_ids, support_nwp_index, support_input_mask,
+                )
+            else:
+                return self.single_reps(test_token_ids, test_segment_ids, test_nwp_index, test_input_mask,)
+        elif reps_type == 'label':
+            reps = None
+            if self.opt.label_reps == 'cat':
+                # todo: use label mask to represent a label with only in domain info
+                reps = self.single_reps(test_token_ids, test_segment_ids, test_nwp_index, test_input_mask,)
+            elif self.opt.label_reps in ['sep', 'sep_sum']:
+                input_ids, segment_ids, input_mask = self.flatten_input(test_token_ids, test_segment_ids,
+                                                                        test_input_mask)
+                # nwp_index = self.flatten_index(test_nwp_index)
+                # get flatten reps: shape (batch_size * label_num, label_des_len)
+                sequence_output, _ = self.bert(input_ids, segment_ids, input_mask, output_all_encoded_layers=False)
+                reps_size = sequence_output.shape[-1]
+                if self.opt.label_reps == 'sep':  # use cls as each label's reps
+                    # re-shape to  (batch_size, label_num, label_des_len)
+                    reps = sequence_output.narrow(-2, 0, 1)  # fetch all [CLS] shape:(batch, 1, rep_size)
+                    reps = reps.contiguous().view(batch_size, -1, reps_size)
+                elif self.opt.label_reps == 'sep_sum':  # average all label reps as reps
+                    reps = sequence_output
+                    emb_mask = self.expand_mask(test_input_mask, 2, reps_size)
+                    # todo: use mask to get sum of single embedding
+                    raise NotImplementedError
+                else:
+                    raise ValueError("Wrong label_reps choice ")
+            return reps
+
+    def expand_mask(self, item: torch.Tensor, expand_size, dim):
+        new_item = item.unsqueeze(dim)
+        expand_shape = list(new_item.shape)
+        expand_shape[dim] = expand_size
+        return new_item.expand(expand_shape)
 class BertSchemaSeparateContextEmbedder(BertSeparateContextEmbedder):
     def __init__(self, opt):
         super(BertSchemaSeparateContextEmbedder, self).__init__(opt)

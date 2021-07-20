@@ -176,8 +176,8 @@ def collate_fn(data):#@改 jinghui 因为这里将batch 拉平了，导致后续
         batch_support[k] = torch.stack(batch_support[k], 0).reshape(batch_size,support_size,-1)# list[30, 128]
     for k in batch_query:
         batch_query[k] = torch.stack(batch_query[k], 0).reshape(batch_size,query_size,-1)
-    batch_query_labels = torch.stack(batch_query_labels, 0)
-    batch_support_labels = torch.stack(batch_support_labels, 0)
+    batch_query_labels = torch.stack(batch_query_labels, 0).reshape(batch_size,query_size,-1)
+    batch_support_labels = torch.stack(batch_support_labels, 0).reshape(batch_size,support_size,-1)
 
     # @jinhui 需要把batch, support size 重新构建好
     # .reshape(batch_size,query_size,-1)
@@ -190,6 +190,7 @@ class FewShotRawDataLoader():
         super(FewShotRawDataLoader, self).__init__()
         self.opt = opt
         self.debugging = opt.do_debug
+        self.idx_dict = {'O': 0, 'T-POS': 1, 'T-NEU': 2, 'T-NEG': 3}#  delete '[PAD]': 0
 
     def load_data(self, path, preprocessor, opt, batch_size, num_workers=1):
         """
@@ -200,12 +201,14 @@ class FewShotRawDataLoader():
                 examples: a list, all example loaded from path
                 few_shot_batches: a list, of fewshot batch, each batch is a list of examples
                 max_len: max sentence length
-            """
+                self.trans_mat = (trans_mat, start_trans_mat, end_trans_mat): the A prior joint distribution probability matrix for dataset
+        """
 
         raw_data = json.load(open(path, 'r'))
         examples = {}
         for domain_name, domain_data in raw_data.items():
-            examples = domain_data
+            examples = domain_data# 应该有循环逻辑进行拼接
+        trans_mat = self.get_trans_mat(examples)
         dataset = FewRelDataset(examples, preprocessor, opt)
         # if self.debugging:
         #     examples, few_shot_batches = examples[:8], few_shot_batches[:2]
@@ -215,8 +218,51 @@ class FewShotRawDataLoader():
                                       pin_memory=True,
                                       num_workers=num_workers,
                                       collate_fn=collate_fn)
-        return iter(data_loader)
+        return iter(data_loader), trans_mat
 
+
+
+    def get_trans_mat(self, examples):
+        """
+            Calculated the prior joint distribution probability matrix between tags
+            input:
+                examples: Dict, key is tags type
+            output
+                trans_mat: (trans_mat, start_trans_mat, end_trans_mat): the A prior joint distribution probability matrix for dataset
+        """
+
+        # transition matrix
+        num_tags = len(self.idx_dict)
+        trans_mat = torch.zeros(num_tags, num_tags, dtype=torch.int32).tolist()
+        start_trans_mat = torch.zeros(num_tags, dtype=torch.int32).tolist()
+        end_trans_mat = torch.zeros(num_tags, dtype=torch.int32).tolist()
+        for tag_type, supports in examples.items():
+            # update transition matrix
+            self.update_trans_mat(trans_mat, start_trans_mat, end_trans_mat, supports)
+
+        return (trans_mat, start_trans_mat, end_trans_mat)
+
+    def update_trans_mat(self,
+                      trans_mat: List[List[int]],
+                      start_trans_mat: List[int],
+                      end_trans_mat: List[int],
+                      support_data: List[str]) -> None:
+        for support_data_item in support_data:
+            labels = support_data_item["labels"]
+            if labels[-1] not in self.idx_dict.keys():
+                labels[-1] = "O" #源数据处理有问题
+            s_idx = self.idx_dict[labels[0]]
+            e_idx = self.idx_dict[labels[-1]]
+
+            start_trans_mat[s_idx] += 1
+            end_trans_mat[e_idx] += 1
+            for i in range(len(labels) - 1):
+                cur_label = labels[i]
+                next_label = labels[i + 1]
+                start_idx = self.idx_dict[cur_label]
+                end_idx = self.idx_dict[next_label]
+
+                trans_mat[start_idx][end_idx] += 1# count
 
 
 

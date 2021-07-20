@@ -15,11 +15,15 @@ class SequenceLabeler(torch.nn.Module):
                                              Union[None, torch.Tensor]]:
         """
 
-        :param logits: (batch_size, seq_len, n_tags)
-        :param mask: (batch_size, seq_len)
-        :param tags: (batch_size, seq_len)
+        :param logits: (batch_size*query_size, seq_len, n_tags)
+        :param mask: (batch_size, seq_len) #@ (batch_size, query_size, seq_len)
+        :param tags: (batch_size, seq_len) #@ (batch_size, query_size, seq_len)
         :return:
         """
+        test_target_sent_len = list(tags.shape)[-1]
+        tags = tags.reshape(-1, test_target_sent_len)
+        mask = mask.reshape(-1, test_target_sent_len)
+
         return self._compute_loss(logits, mask, tags)
 
     def _compute_loss(self,
@@ -28,16 +32,16 @@ class SequenceLabeler(torch.nn.Module):
                       targets: torch.Tensor) -> torch.Tensor:
         """
 
-        :param logits:
-        :param mask:
-        :param targets:
+        :param logits: (batch_size, seq_len, n_tags)
+        :param mask: (batch_size, seq_len)
+        :param tags: (batch_size, seq_len)
         :return:
         """
 
         batch_size, seq_len = mask.shape
-        normalised_emission = masked_log_softmax(logits, mask.unsqueeze(-1), dim=-1)
+        normalised_emission = masked_log_softmax(logits, mask.unsqueeze(-1), dim=-1)#(batch_size, seq_len, n_tags)
         loss = normalised_emission.gather(dim=-1, index=targets.unsqueeze(-1))
-        return -1 * loss.sum() / batch_size
+        return -1 * loss.sum() / batch_size #@jinhui 疑惑 为什么要有-1
 
     def decode(self, logits: torch.Tensor, masks: torch.Tensor) -> List[List[int]]:
         return self.remove_pad(preds=logits.argmax(dim=-1), masks=masks)

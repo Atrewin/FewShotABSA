@@ -36,32 +36,38 @@ class FewShotTransitionScorer(TransitionScorerBase):
         Btw, start or end transition is back-offed as [O, B, I]
     """
     def __init__(self, num_tags: int, normalizer: ScaleControllerBase = None, scaler: Callable = None,
-                 r: float = 1, backoff_init='rand'):
+                 r: float = 1, backoff_init='rand', trans_mat=None):
         """
         :param num_tags:
         :param normalizer: normalize the backoff transition before unfold, such as p1 normalization or softmax
         :param r: trade-off between back-off transition and target transition
         :param scaler: function to keep transition non-negative, such as relu, exp.
         :param backoff_init: method to initialize the backoff transition: rand, big_pos, fix
+        :param trans_mat: the pre-defined transition matrix
         """
         super(FewShotTransitionScorer, self).__init__(num_tags, normalizer, scaler)
         self.r = r  # Interpolation rate between source transition and target transition
         self.num_tags = num_tags  # this num include [PAD] now
         self.no_pad_num_tags = self.num_tags - 1
         self.backoff_init = backoff_init
+        self.trans_mat, self.start_trans_mat, self.end_trans_mat = trans_mat # used in init backoff trans by global_statistic
 
         ''' build transition matrices  '''
         self.backoff_trans_mat, self.backoff_start_trans_mat, self.backoff_end_trans_mat = None, None, None
         self.target_start_trans_mat, self.target_end_trans_mat, self.target_trans_mat = None, None, None
         if self.r > 0:  # source transition is used
             self.init_backoff_trans()
-            # index used to map backoff transition to accurate transition
-            self.unfold_index = self.build_unfold_index()  # non-parameter version
-            self.start_end_unfold_index = self.build_start_end_unfold_index()  # non-parameter version
+            # index used to map backoff transition to accurate transition # 因为之前会有有些多余的index 如[PAD]
+            # self.unfold_index = self.build_unfold_index()  # non-parameter version
+            # self.start_end_unfold_index = self.build_start_end_unfold_index()  # non-parameter version
+
+            # 其全部-1即可
         if self.r < 1:  # target transition is used
             self.target_trans_mat = torch.randn(num_tags, num_tags, dtype=torch.float)
             self.target_start_trans_mat = torch.randn(num_tags, dtype=torch.float)
             self.target_end_trans_mat = torch.randn(num_tags, dtype=torch.float)
+
+        # Todo: enable following 'parameter' version to support fine-tuning setting
 
     def forward(self, test_reps: torch.Tensor, support_target: torch.Tensor, label_reps: torch.Tensor = None
                 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -101,19 +107,33 @@ class FewShotTransitionScorer(TransitionScorerBase):
 
     def init_backoff_trans(self):
         if self.backoff_init == 'rand':
-            self.backoff_trans_mat = nn.Parameter(nn.init.xavier_normal_(torch.randn(3, 5, dtype=torch.float)),
+            self.backoff_trans_mat = nn.Parameter(nn.init.xavier_normal_(torch.randn(4, 4, dtype=torch.float)),
                                                   requires_grad=True)
-            self.backoff_start_trans_mat = nn.Parameter(0.5 * torch.randn(3, dtype=torch.float), requires_grad=True)
-            self.backoff_end_trans_mat = nn.Parameter(0.5 * torch.randn(3, dtype=torch.float), requires_grad=True)
+            self.backoff_start_trans_mat = nn.Parameter(0.5 * torch.randn(4, dtype=torch.float), requires_grad=True)
+            self.backoff_end_trans_mat = nn.Parameter(0.5 * torch.randn(4, dtype=torch.float), requires_grad=True)
         elif self.backoff_init == 'fix':  # initial it with a big positive number
             self.backoff_trans_mat = nn.Parameter(torch.tensor(
-                [[0.5, 0.5, -0.5, 0.5, -0.5],
-                 [0.4, 0.2, 0.5, 0.2, -0.5],
-                 [0.5, 0.2, 0.5, 0.2, -0.5]]), requires_grad=True)
-            self.backoff_start_trans_mat = nn.Parameter(torch.tensor([0.5, 0.2, -0.5]), requires_grad=True)
-            self.backoff_end_trans_mat = nn.Parameter(torch.tensor([0.5, 0.2, 0.5]), requires_grad=True)
+                [[0.6, 0.2, 0.2, 0.2],
+                 [0.6, 0.4, 0.2, -0.5],
+                 [0.6, 0.4, 0.4, 0.4],
+                 [0.6, -0.5, 0.4, 0.2]]), requires_grad=True)
+            self.backoff_start_trans_mat = nn.Parameter(torch.tensor([0.5, 0.2, 0.2, 0.2]), requires_grad=True)
+            self.backoff_end_trans_mat = nn.Parameter(torch.tensor([0.5, 0.2, 0.2, 0.2]), requires_grad=True)
+        elif self.backoff_init == 'global_statistic':
+
+            # the transition matrix is statistic from all training data
+            self.backoff_trans_mat = nn.Parameter(
+                torch.div(self.trans_mat,
+                          self.trans_mat.sum(dim=-1, keepdim=True)), requires_grad=False)
+            self.backoff_start_trans_mat = nn.Parameter(
+                torch.div(self.start_trans_mat, self.start_trans_mat.sum(dim=-1, keepdim=True)), requires_grad=False)
+            self.backoff_end_trans_mat = nn.Parameter(
+                torch.div(self.end_trans_mat,self.end_trans_mat.sum(dim=-1, keepdim=True)), requires_grad=False)
         else:
             raise ValueError("in-valid choice for transition initialization")
+
+        # @jinhui 还没联动check
+        print("还没联通调整：transition_scorer 135")
 
     def unfold_backoff_trans(self) -> (torch.Tensor, torch.Tensor, torch.Tensor):
         """ Label2id must follow rules:  1. id(PAD)=0 id(O)=1  2. id(B-X)=i  id(I-X)=i+1  """
@@ -139,7 +159,7 @@ class FewShotTransitionScorer(TransitionScorerBase):
         # -1 to block [PAD] label
         sp_tag_num = int(self.no_pad_num_tags / 2)
         unfold_index = torch.zeros(self.no_pad_num_tags, self.no_pad_num_tags, dtype=torch.long)
-        index_viewer = torch.tensor(range(15)).view(3, 5)  # 15 = backoff element num, unfold need a flatten index
+        index_viewer = torch.tensor(range(16)).view(4, 4)  # 15 = backoff element num, unfold need a flatten index
         # O to O
         unfold_index[0][0] = index_viewer[0, 0]
         for j in range(1, sp_tag_num + 1):
@@ -298,11 +318,11 @@ class LabelRepsBiaffineTranser(torch.nn.Module):
         """
         label_reps = self.mlp(label_reps) if self.use_mlp else label_reps
 
-        # (num_tags, num_tags)
+        # shape (num_tags, num_tags)
         self.label_trans_mat = self.biaffine_scorer(label_reps, label_reps)
-        # (num_tags)
+        # shape (num_tags)
         self.label_start_trans_mat = self.biaffine_scorer(self.start_reps, label_reps)[0, :].view(self.num_tags)
-        # (num_tags)
+        # shape (num_tags)
         self.label_end_trans_mat = self.biaffine_scorer(label_reps, self.end_reps)[:, 0].view(self.num_tags)
 
         if self.active_fun is not None:
@@ -323,7 +343,6 @@ class LabelRepsBiaffineTranser(torch.nn.Module):
             return self.mlp_active_fun(input)
         else:
             return input
-
 
     def biaffine_scorer(self, l1_reps, l2_reps):
         """
@@ -359,6 +378,7 @@ class LabelRepsCatTranser(torch.nn.Module):
         self.num_tags = num_tags
         self.emb_dim = emb_dim
         self.label_cat_linear = nn.Linear(emb_dim*2, 1)
+        # self.weight_back = nn.Parameter(torch.randn(emb_dim, emb_dim, dtype=torch.float), requires_grad=True)
         self.active_fun = None
 
         self.start_reps, self.end_reps = nn.Parameter(torch.randn(emb_dim, dtype=torch.float), requires_grad=True), \
@@ -378,7 +398,6 @@ class LabelRepsCatTranser(torch.nn.Module):
 
         label_reps = self.mlp(label_reps) if self.use_mlp else label_reps
 
-        # dk = label_reps.shape[1]
         dk = self.emb_dim
         sqrt_dk = math.sqrt(dk)
 
@@ -416,17 +435,6 @@ class LabelRepsCatTranser(torch.nn.Module):
         return input
 
 
-if False:
-    a = LabelRepsTranser(4, 5)
-    input = torch.randn(5, 5, dtype=torch.float)
-    # print(input)
-    # output, output1, output2 = a(input)
-    output1, output2, output3 = a(input)
-    print(output1.shape, output2.shape, output3.shape)
-    exit(0)
-    # print(output1.shape, output2.shape)
-
-
 class FewShotTransitionScorerFromLabel(TransitionScorerBase):
     """
         This transition scorer learns a backoff transition as following shows:
@@ -455,7 +463,6 @@ class FewShotTransitionScorerFromLabel(TransitionScorerBase):
         self.no_pad_num_tags = self.num_tags - 1
         self.backoff_init = backoff_init
 
-        # self.label_reps_transer = LabelRepsBiaffineTranser(self.no_pad_num_tags, 768)
         self.label_reps_transer = LabelRepsCatTranser(self.no_pad_num_tags, 768)
         self.g = label_scaler  # to scale transition from label reps
 
@@ -471,6 +478,8 @@ class FewShotTransitionScorerFromLabel(TransitionScorerBase):
             self.target_trans_mat = torch.randn(num_tags, num_tags, dtype=torch.float)
             self.target_start_trans_mat = torch.randn(num_tags, dtype=torch.float)
             self.target_end_trans_mat = torch.randn(num_tags, dtype=torch.float)
+
+        # Todo: enable following 'parameter' version to support fine-tuning setting
 
     def forward(self, test_reps: torch.Tensor, support_target: torch.Tensor, label_reps: torch.Tensor = None
                 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:

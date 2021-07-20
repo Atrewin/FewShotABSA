@@ -151,23 +151,22 @@ class PrototypeEmissionScorer(EmissionScorerBase):
             support_targets: torch.Tensor,
             label_reps: torch.Tensor = None, ) -> torch.Tensor:
         """
-        :param test_reps: (batch_size, support_size, test_seq_len, dim), notice: reps has been expand to support size
-        :param support_reps: (batch_size, support_size, support_seq_len)
-        :param test_output_mask: (batch_size, test_seq_len)
+        :param test_reps: (batch_size, support_size, test_seq_len, dim), notice: reps has been expand to support size #@(batch_size*query_size, support_size, test_seq_len, dim)
+        :param support_reps: (batch_size, support_size, support_seq_len) #@(batch_size, support_size, support_seq_len, dim)
+        :param test_output_mask: (batch_size, test_seq_len)  #@ (batch_size, query_size, test_seq_len)
         :param support_output_mask: (batch_size, support_size, support_seq_len)
         :param support_targets: one-hot label targets: (batch_size, support_size, support_seq_len, num_tags)
-        :param label_reps: (batch_size, num_tags, dim)
+        :param label_reps: (batch_size, num_tags, dim) #@ None
         :return: emission, shape: (batch_size, test_len, no_pad_num_tags)
         """
         similarity = self.similarity_scorer(
-            test_reps, support_reps, test_output_mask, support_output_mask, support_targets)
-        emission = self.get_emission(similarity, support_targets)  # shape(batch_size, test_len, no_pad_num_tag)
+            test_reps, support_reps, test_output_mask, support_output_mask, support_targets)# shape(batch_size, test_len, num_tag)
+        emission = self.get_emission(similarity)  # shape(batch_size, test_len, no_pad_num_tag)
         return emission
-
-    def get_emission(self, similarities: torch.Tensor, support_targets: torch.Tensor):
+    def get_emission(self, similarities: torch.Tensor):
         """
-        :param similarities: (batch_size, support_size, test_seq_len, support_seq_len)
-        :param support_targets: one-hot label targets: (batch_size, support_size, support_seq_len, num_tags)
+        :param similarities: (batch_size*query_size, test_seq_len, num_tag)
+
         :return: emission: shape: (batch_size, test_len, no_pad_num_tags)
         """
         batch_size, test_len, num_tags = similarities.shape
