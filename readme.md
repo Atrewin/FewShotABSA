@@ -1,8 +1,15 @@
-# 此版本为尚未完结版本，直接使用query set得到的边界loss和类型loss
+# Few-shot Slot Tagging
+
+This is the code of the ACL 2020 paper: [Few-shot Slot Tagging with Collapsed Dependency Transfer and Label-enhanced Task-adaptive Projection Network](https://atmahou.github.io/attachments/atma's_acl2020_FewShot.pdf).
 
 
+## Notice: Better implementation availiable now!
 
-# Fine-grained Few-shot 
+- A new and powerfull platform is now availiable for general few-shot learning problems!!
+
+- It fully support current experiments with better interface and flexibility~ (E.g. supoort newer [huggingface/transformers](https://github.com/huggingface/transformers))
+
+Try it at: https://github.com/AtmaHou/MetaDialog
 
 ## Get Started
 
@@ -12,7 +19,7 @@ python >= 3.6
 pytorch >= 0.4.1
 pytorch_pretrained_bert >= 0.6.1
 allennlp >= 0.8.2
-torchnlp
+pytorch-nlp
 ```
 
 ### Step1: Prepare BERT embedding:
@@ -25,7 +32,7 @@ pytorch_pretrained_bert convert_tf_checkpoint_to_pytorch
   $BERT_BASE_DIR/bert_config.json
   $BERT_BASE_DIR/pytorch_model.bin
 ```
-- Set BERT path in the file `./scripts/run_SpanProtonet.sh` to your setting:
+- Set BERT path in the file `./scripts/run_L-Tapnet+CDT.sh` to your setting:
 ```bash
 bert_base_uncased=/your_dir/uncased_L-12_H-768_A-12/
 bert_base_uncased_vocab=/your_dir/uncased_L-12_H-768_A-12/vocab.txt
@@ -33,11 +40,15 @@ bert_base_uncased_vocab=/your_dir/uncased_L-12_H-768_A-12/vocab.txt
 
 
 ### Step2: Prepare data
-- Set test, train, dev data file path in `./scripts/run_SpanProtonet.sh` to your setting.
+- Download few-shot data at [my homepage](https://atmahou.github.io/) or click here: [download](https://atmahou.github.io/attachments/ACL2020data.zip)
+
+> Tips: The numbers in file name denote cross-evaluation id, you can run a complete experiment by only using data of id=1.
+
+- Set test, train, dev data file path in `./scripts/run_L-Tapnet+CDT.sh` to your setting.
   
 > For simplicity, your only need to set the root path for data as follow:
 ```bash
-base_data_dir=/your_dir/data/
+base_data_dir=/your_dir/ACL2020data/
 ```
 
 ### Step3: Train and test the main model
@@ -50,14 +61,23 @@ mkdir result
 
 ##### Example for 1-shot Snips:
 ```bash
-source ./scripts/run_SpanProtonet.sh 0
-```
+source ./scripts/run_L-Tapnet+CDT.sh 0 snips
+```  
 ##### Example for 1-shot NER:
 ```bash
-source ./scripts/run_SpanProtonet.sh 0
+source ./scripts/run_L-Tapnet+CDT.sh 0 ner
 ```
 
-> To run 5-shots experiments, use `./scripts/run_SpanProtonet_5.sh`
+> To run 5-shots experiments, use `./scripts/run_L-Tapnet+CDT_5.sh`
+
+## Model for Other Setting
+
+We also provide scripts of four model settings as follows: 
+- Tap-Net
+- Tap-Net + CDT
+- L-WPZ + CDT
+- L-Tap-Net + CDT 
+> You can find their corresponding scripts in `./scripts/` with the same usage as above.
 
 
 ## Project Architecture
@@ -74,10 +94,10 @@ source ./scripts/run_SpanProtonet.sh 0
     - Sequence Labeler (`few_shot_seq_labeler.py`): a framework that integrates modules below to perform sequence labeling.
 - Modules
     - Embedder Module (`context_embedder_base.py`): modules that provide embeddings.
-    - Boundary Detection Module (`SpanDetector.py`): modules that detect entity boundary
-    - Boundary Output Module (`crf.py`): boundary detection output layer with conditional random field 
-    - Span Classification Module(`span_classification_base.py`): modules that classify the span by metric learning
-    - Output Module (`span_entity_labeler.py`): output layer with normal mlp.
+    - Emission Module (`emission_scorer_base.py`): modules that compute emission scores. 
+    - Transition Module (`transition_scorer.py`): modules that compute transition scores.
+    - Similarity Module (`similarity_scorer_base.py`): modules that compute similarities for metric learning based emission scorer.
+    - Output Module (`seq_labeler.py`, `conditional_random_field.py`): output layer with normal mlp or crf.
     - Scale Module (`scale_controller.py`): a toolkit for re-scale and normalize logits.
 
 ### `utils`
@@ -90,52 +110,13 @@ source ./scripts/run_SpanProtonet.sh 0
     - controllable parameters definition (`opt.py`), 
     - device definition (`device_helper`) 
     - config (`config.py`).
-    
-##### few-shot/meta-episode style data example
-
-```json
-{
-  "domain_name": [
-    {  // episode
-      "support": {  // support set
-        "text": ["The", "speed", "is", "incredible", "and", "I", "am", "more", "than", "satisfied", "."],  // input sequence
-        "labels": ["O", "T-POS", "O", "O", "O", "O", "O", "O", "O", "O", "O"],  // output sequence in sequence labeling task
-        "sent": "POS"  // sentiment labels
-      },
-      "query": {  // query set
-        "text": ["I", "am", "using", "the", "external", "speaker", "sound", "is", "good", "."],
-        "labels": ["O", "O", "O", "O", "T-POS", "T-POS", "T-POS", "O", "O", "O"]
-        "sent": "POS"  
-      }
-    },
-    ...
-  ],
-  ...
-}
-
-```
 
 
-# run in pycharm  
+## Updates - New branch: `fix_TapNet_svd_issue`
+Thanks [Wangpeiyi9979](https://github.com/Wangpeiyi9979) for pointing out the problem of TapNet implementation ([issue](https://github.com/AtmaHou/FewShotTagging/issues/20)), which is caused by port differences of `cupy.linalg.svd` and `svd() in pytorch`. 
 
-
-## not CRF
-CUDA_VISIBLE_DEVICES=2 python main.py --do_debug --do_train --do_predict --delete_checkpoin --load_feature --train_path processed_data/v3/train_2.json --dev_path processed_data/v3/test_2.json --test_path processed_data/v3/test_2.json --output_dir outputs_models/model/2 --bert_path /home/cike/hui/Pre-BERTs/bert-base-uncased/uncased_L-12_H-768_A-12 --bert_vocab /home/cike/hui/Pre-BERTs/bert-base-uncased/uncased_L-12_H-768_A-12/vocab.txt --train_batch_size 2 --cpt_per_epoch 2 --gradient_accumulation_steps 1 --num_train_epochs -1 --warmup_epoch 0 --test_batch_size 2 --context_emb sep_bert --label_reps sep --emission proto --similarity dot --ems_scale_r 0.01 --decoder sms
-
-## CRF
-CUDA_VISIBLE_DEVICES=2 python main.py --do_debug --do_train --mask_transition --do_predict --delete_checkpoin --load_feature --train_path processed_data/v3/train_2.json --dev_path processed_data/v3/test_2.json --test_path processed_data/v3/test_2.json --output_dir outputs_models/model/2 --bert_path /home/cike/hui/Pre-BERTs/bert-base-uncased/uncased_L-12_H-768_A-12 --bert_vocab /home/cike/hui/Pre-BERTs/bert-base-uncased/uncased_L-12_H-768_A-12/vocab.txt --train_batch_size 2 --cpt_per_epoch 2 --gradient_accumulation_steps 1 --num_train_epochs -1 --warmup_epoch 0 --test_batch_size 2 --context_emb sep_bert --label_reps sep --emission proto --similarity dot --ems_scale_r 0.01 --decoder crf -t_scl learn -t_nm norm -lt_nm softmax -t_scl learn
-#
-export BERT_BASE_DIR=/home/cike/hui/Pre-BERTs/bert-base-uncased/uncased_L-12_H-768_A-12/
-
-pytorch_pretrained_bert convert_tf_checkpoint_to_pytorch $BERT_BASE_DIR/bert_model.ckpt $BERT_BASE_DIR/bert_config.json $BERT_BASE_DIR/pytorch_model.bin
+The corrected codes are included in new branch named `fix_TapNet_svd_issue`, because we found correction of TapNet will slightly degrade performance (still the best).
 
 
 
-##积累
-torch.gather()
-unsqueeze()
-squeeze_()
-.expand()
-index_select()
-argmax()
-
+https://github.com/tuzhaopeng/daily-paper-reading
