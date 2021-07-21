@@ -5,6 +5,7 @@ import logging
 import sys
 import torch
 import copy
+import torchcrf
 # my staff
 from models.modules.context_embedder_base import BertContextEmbedder, \
     BertSeparateContextEmbedder, NormalContextEmbedder, BertSchemaContextEmbedder, BertSchemaSeparateContextEmbedder
@@ -103,13 +104,18 @@ def make_model(opt, num_tags, trans_r, id2label=None, random_num_tags=None):
         raise TypeError('wrong component type')
 
     ''' Build decoder '''
+
     if opt.decoder == 'sms':
         transition_scorer = None
         decoder = SequenceLabeler()
     elif opt.decoder == 'rule':
         transition_scorer = None
         decoder = RuleSequenceLabeler(id2label)
-    elif opt.decoder == 'crf':
+
+    elif opt.decoder == "crf":
+        transition_scorer = 1  # FSTagging 之前的设计，我们用不到，但是会作为后面执行分支的判断， 所以设为1
+        decoder = torchcrf.CRF(num_tags-1)# remove pad
+    elif opt.decoder == 'crf-specific':
         # Notice: only train back-off now
         if opt.train_trans_mat == None:
             raise ValueError('the tran_mat is not defined')

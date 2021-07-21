@@ -106,14 +106,15 @@ class TrainerBase:
         model.train()
 
         for epoch_id in trange(int(num_train_epochs), desc="Epoch"):# batch_size=2
-            for step, batch in enumerate(tqdm(train_data_loader, desc="Train-Batch Progress")):
+            for step, batch in enumerate(tqdm(train_data_loader, desc="Train-Batch Progress", ncols=200)):
+                # print("\r")
                 if self.n_gpu == -1:#if self.n_gpu == 1:#不明白为什么单GPU的时候需要这个来处理？
                     batch = tuple(t.to(self.device) for t in batch)  # multi-gpu does scattering it-self
                 ''' loss '''
                 loss = self.do_forward(batch, model, epoch_id, step)# loss 后面*(-1)是怎么回事？
                 loss = self.process_special_loss(loss)  # for parallel process, split batch and so on
                 loss.backward()
-                exit()
+                # exit()
                 # 04.27
                 ''' optimizer step '''
                 global_step, model, is_nan, update_model = self.optimizer_step(step, model, global_step)
@@ -140,9 +141,9 @@ class TrainerBase:
                 ''' convergence detection & early stop '''
                 loss_now = loss.item() if update_model else loss.item() + loss_now
                 if self.opt.convergence_window > 0 and update_model:
-                    if global_step % 100 == 0 or total_step % len(data_loader) == 0:
+                    if global_step % 100 == 0 or total_step % len(train_data_loader) == 0:
                         print('Current loss {}, global step {}, min loss now {}, no loss decay step {}'.format(
-                            loss_now, global_step, min_loss, no_loss_decay_steps))
+                            loss_now, global_step, min_loss, no_loss_decay_steps), end="")
                     if loss_now < min_loss:
                         min_loss = loss_now
                         no_loss_decay_steps = 0
@@ -412,7 +413,7 @@ class FewShotTrainer(TrainerBase):
         ret = {
             'state_dict': model.state_dict(),
             'opt': self.opt,
-            'config': model.config,
+            # 'config': model.config,
         }
         return ret
 

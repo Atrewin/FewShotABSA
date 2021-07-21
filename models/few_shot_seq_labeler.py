@@ -3,6 +3,7 @@ import torch
 from typing import List
 from models.modules.context_embedder_base import ContextEmbedderBase
 import torch
+import torchcrf
 from typing import List
 
 from models.modules.emission_scorer_base import EmissionScorerBase
@@ -81,7 +82,7 @@ class FewShotSeqLabeler(torch.nn.Module):
         loss, prediction = torch.FloatTensor(0).to(test_target.device), None
 
         #calculate transition
-        if self.transition_scorer:
+        if self.opt.decoder == "crf-specific":
             transitions, start_transitions, end_transitions = self.transition_scorer(test_reps, support_label)
 
             if self.label_mask is not None:
@@ -108,9 +109,32 @@ class FewShotSeqLabeler(torch.nn.Module):
                 prediction, path_score = zip(*best_paths)
                 # we block pad label(id=0) before by - 1, here, we add 1 back
                 prediction = self.add_back_pad_label(prediction)
-        else:
-            self.decoder: SequenceLabeler
+        elif self.opt.decoder == "crf":
+            self.decoder: torchcrf.CRF
 
+            # shape to API
+            # emission size is (seq_length, batch_size, num_tags)
+            # test_target size is (seq_length, batch_size)
+            # mask size is (seq_length, batch_size) as booleans
+            # notes: batch_size = batch_size * query_size
+            query_shape = list(test_target.shape)
+            emission = emission.transpose(0, 1)
+            test_target = test_target.reshape(-1, query_shape[-1]).transpose(0, 1)
+            test_output_mask = test_output_mask.reshape(-1, query_shape[-1]).transpose(0, 1) > 0
+
+            if self.training:
+                # the CRF staff
+                llh = self.decoder(emission, test_target, mask=test_output_mask) # emission: (seq_length, batch_size, num_tags); test_target: (seq_length, batch_size)
+                loss = -1 * llh
+            else:
+                # split path and score
+                prediction = self.decoder.decode(emission)
+                # we block pad label(id=0) before by - 1, here, we add 1 back
+                prediction = self.add_back_pad_label(prediction)
+            pass
+        else:
+            # sms
+            self.decoder: SequenceLabeler
             if self.training:
                 loss = self.decoder.forward(logits=logits,
                                             tags=test_target,
