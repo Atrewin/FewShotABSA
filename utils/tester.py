@@ -55,26 +55,29 @@ class TesterBase:
         all_results = []
 
         model.eval()
-        data_loader = self.get_data_loader(test_features)
-
+        data_loader = test_features
+        scores = []
         for batch in tqdm(data_loader, desc="Eval-Batch Progress"):
-            batch = tuple(t.to(self.device) for t in batch)  # multi-gpu does scattering it-self
+
             with torch.no_grad():
-                predictions = self.do_forward(batch, model)
-            for i, feature_gid in enumerate(batch[0]):  # iter over feature global id
-                prediction = predictions[i]
-                feature = test_features[feature_gid.item()]
-                all_results.append(RawResult(feature=feature, prediction=prediction))
-                if model.emb_log:
-                    model.emb_log.write('text_' + str(feature_gid.item()) + '\t'
-                                        + '\t'.join(feature.test_feature_item.data_item.seq_in) + '\n')
+                predictions = self.do_forward(batch, model) # 有了预测，还是下面要计算得分
+                predictions = torch.tensor(predictions, dtype=torch.long)
+                labels = batch[-1]# 有个问题是pad的部分好像还没移除掉
+                score = self.accuracy(predictions, labels)# 里面没有实现
+                scores.append(score)
 
-        # close file handler
-        if model.emb_log:
-            model.emb_log.close()
+        total_scores = 0
+        for score in scores:
+            total_scores += score
+        return total_scores/len(scores)
 
-        scores = self.eval_predictions(all_results, id2label, log_mark)
-        return scores
+    def accuracy(self, pred, label):
+        '''
+        pred: Prediction results with whatever size
+        label: Label with whatever size
+        return: [Accuracy] (A single value)
+        '''
+        return torch.mean((pred.view(-1) == label.view(-1)).type(torch.FloatTensor)).item()#0.2500,
 
     def get_data_loader(self, features):
         dataset = TensorDataset([self.unpack_feature(f) for f in features])
@@ -97,6 +100,9 @@ class TesterBase:
         return prediction
 
     def eval_predictions(self, *args, **kwargs) -> float:
+
+
+
         raise NotImplementedError
 
 
@@ -272,8 +278,8 @@ class FewShotTester(TesterBase):
         old_num_tags = len(self.get_value_from_order_dict(emission_dict, 'label_reps'))
 
         config = {'num_tags': len(id2label), 'id2label': id2label}
-        if 'num_anchors' in old_model.config:
-            config['num_anchors'] = old_model.config['num_anchors']  # Use previous model's random anchors.
+        # if 'num_anchors' in old_model.config:
+        #     config['num_anchors'] = old_model.config['num_anchors']  # Use previous model's random anchors.
         # get a new instance for different domain
         new_model = make_model(opt=self.opt, config=config)
         new_model = prepare_model(self.opt, new_model, self.device, self.n_gpu)

@@ -106,10 +106,11 @@ class TrainerBase:
         model.train()
 
         for epoch_id in trange(int(num_train_epochs), desc="Epoch"):# batch_size=2
+            # 内部是抽样的，好像没办法执行epoch
             for step, batch in enumerate(tqdm(train_data_loader, desc="Train-Batch Progress", ncols=200)):
                 # print("\r")
-                if self.n_gpu == -1:#if self.n_gpu == 1:#不明白为什么单GPU的时候需要这个来处理？
-                    batch = tuple(t.to(self.device) for t in batch)  # multi-gpu does scattering it-self
+                # if self.n_gpu == -1:#if self.n_gpu == 1:#不明白为什么单GPU的时候需要这个来处理？
+                #     batch = tuple(t.to(self.device) for t in batch)  # multi-gpu does scattering it-self
                 ''' loss '''
                 loss = self.do_forward(batch, model, epoch_id, step)# loss 后面*(-1)是怎么回事？
                 loss = self.process_special_loss(loss)  # for parallel process, split batch and so on
@@ -123,11 +124,11 @@ class TrainerBase:
                 total_step += 1
 
                 ''' model selection '''
-                if self.time_to_make_check_point(total_step, train_data_loader):
+                if self.time_to_make_check_point(total_step, train_data_loader) or 1:
                     if self.tester and self.opt.eval_when_train:  # this is not suit for training big model
-                        print("Start dev eval.")
-                        dev_score, test_score, copied_best_model = self.model_selection(
-                            model, best_dev_score_now, dev_data_loader, dev_id2label, test_features, test_id2label)
+                        print("Start dev eval.")#@jinhui 7.23 下面还没有调通
+                        dev_score, test_score, copied_best_model = self.model_selection(# 这个函数需要做的事计算在target domain 上的acc 然后决定是否保存模型
+                            model, best_dev_score_now, dev_data_loader, self.opt.sent_id2label)
 
                         if dev_score > best_dev_score_now:
                             best_dev_score_now = dev_score
@@ -166,9 +167,9 @@ class TrainerBase:
         return best_model_now, best_dev_score_now, test_score
 
     def time_to_make_check_point(self, step, data_loader):
-        interval_size = int(len(data_loader) / self.opt.cpt_per_epoch)
-        remained_step = len(data_loader) - (step % len(data_loader))  # remained step for current epoch
-        return (step % interval_size == 0 < interval_size <= remained_step) or (step % len(data_loader) == 0)
+        # interval_size = int(len(data_loader) / self.opt.cpt_per_epoch)
+        # remained_step = len(data_loader) - (step % len(data_loader))  # remained step for current epoch
+        return (step % 100 == 0)
 
     def get_dataset(self, features):
         return TensorDataset([self.unpack_feature(f) for f in features])
@@ -247,11 +248,12 @@ class TrainerBase:
         """ do model selection during training"""
         print("Start dev model selection.")
         # do dev eval at every dev_interval point and every end of epoch
-        dev_model = self.tester.clone_model(model, dev_id2label)  # copy reusable params, for a different domain
-        if self.opt.mask_transition and self.opt.task == 'sl':
+        # dev_model = self.tester.clone_model(model, dev_id2label)  # copy reusable params, for a different domain
+        dev_model = model
+        if self.opt.mask_transition and self.opt.task == 'sl':#@jinhui
             dev_model.label_mask = self.opt.dev_label_mask.to(self.device)
 
-        dev_score = self.tester.do_test(dev_model, dev_features, dev_id2label, log_mark='dev_pred')
+        dev_score = self.tester.do_test(dev_model, dev_data_loader, dev_id2label, log_mark='dev_pred')
         logger.info("  dev score(F1) = {}".format(dev_score))
         print("  dev score(F1) = {}".format(dev_score))
         best_model = None
@@ -293,7 +295,7 @@ class TrainerBase:
             logger.info('testing check point: {}'.format(cpt_file))
             model = load_model(os.path.join(self.opt.output_dir, cpt_file))
             dev_score, test_score, copied_model = self.model_selection(
-                model, best_score, dev_features, dev_id2label, test_features, test_id2label)
+                model, best_score, dev_features, dev_id2label)
             if dev_score > best_score:
                 best_score = dev_score
                 test_score_then = test_score

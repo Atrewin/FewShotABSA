@@ -80,7 +80,7 @@ def main():
         train_data_loader, train_trans_mat, dev_data_loader, dev_trans_mat = \
             get_training_dataloader(opt, data_loader, preprocessor)
         # todo: remove the train label mask out of opt.
-        if opt.mask_transition:
+        if opt.mask_transition:# 不知道用来干什么的，后面还有蛮多地方用到了
             # opt.train_label_mask = make_label_mask(opt, opt.train_path, sent_label2id)
             # opt.dev_label_mask = make_label_mask(opt, opt.dev_path, sent_label2id)# 这是联合分布矩阵的扩张方式
             opt.train_trans_mat = [torch.Tensor(item).to(device) for item in train_trans_mat]
