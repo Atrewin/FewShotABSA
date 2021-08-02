@@ -10,6 +10,18 @@ pytorch >= 0.4.1
 pytorch_pretrained_bert >= 0.6.1
 allennlp >= 0.8.2
 torchnlp
+
+> For graph training 
+* `stanza`
+* `torch_scatter==2.0.5`
+* `torch_sparse==0.6.8`
+* `torch_cluster==1.5.8`
+* `torch_geometric==1.6.3`
+* `scipy==2.3.4`
+* `gensim==3.8.1`
+* `nltk`
+(torch_cluster, torch_geometric, torch_scatter, torch_sparse 安装需要一点心思)  
+建议 pip install 
 ```  
 
 
@@ -43,6 +55,10 @@ base_data_dir=/your_dir/data/
 ## CRF
 > CUDA_VISIBLE_DEVICES=2 python main.py --do_debug --do_train --eval_when_train --do_predict --delete_checkpoin --load_feature --train_path processed_data/v3/train_2.json --dev_path processed_data/v3/test_2.json --test_path processed_data/v3/test_2.json --output_dir outputs_models/model/2 --bert_path /home/cike/hui/Pre-BERTs/bert-base-uncased/uncased_L-12_H-768_A-12 --bert_vocab /home/cike/hui/Pre-BERTs/bert-base-uncased/uncased_L-12_H-768_A-12/vocab.txt --train_batch_size 2 --cpt_per_epoch 2 --gradient_accumulation_steps 1 --num_train_epochs -1 --warmup_epoch 0 --test_batch_size 2 --context_emb sep_bert --label_reps sep --emission proto --similarity dot --ems_scale_r 0.01 --decoder crf -t_scl learn -t_nm norm -lt_nm softmax -t_scl learn
 
+--do_debug --do_train --eval_when_train --do_predict --delete_checkpoin --load_feature --train_path processed_data/v3/train_2.json --dev_path processed_data/v3/test_2.json --test_path processed_data/v3/test_2.json --output_dir outputs_models/model/2 --bert_path /home/cike/hui/Pre-BERTs/bert-base-uncased/uncased_L-12_H-768_A-12 --bert_vocab /home/cike/hui/Pre-BERTs/bert-base-uncased/uncased_L-12_H-768_A-12/vocab.txt --train_batch_size 2 --cpt_per_epoch 2 --gradient_accumulation_steps 1 --num_train_epochs -1 --warmup_epoch 0 --test_batch_size 2 --context_emb sep_bert --label_reps sep --emission proto --similarity dot --ems_scale_r 0.01 --decoder crf -t_scl learn -t_nm norm -lt_nm softmax -t_scl learn --rcnn_checkpoint extention/Graph_Embedding/weights/model_epoch950_books_wordNet.pt
+--do_debug --do_train --eval_when_train --do_predict --delete_checkpoin --load_feature --train_path processed_data/v3/train_2.json --dev_path processed_data/v3/test_2.json --test_path processed_data/v3/test_2.json --output_dir outputs_models/model/2 --bert_path /home/cike/hui/Pre-BERTs/bert-base-uncased/uncased_L-12_H-768_A-12 --bert_vocab /home/cike/hui/Pre-BERTs/bert-base-uncased/uncased_L-12_H-768_A-12/vocab.txt --train_batch_size 2 --cpt_per_epoch 2 --gradient_accumulation_steps 1 --num_train_epochs -1 --warmup_epoch 0 --test_batch_size 2 --context_emb bert_graph --label_reps sep --emission proto --similarity dot --ems_scale_r 0.01 --decoder crf -t_scl learn -t_nm norm -lt_nm softmax -t_scl learn --rcnn_checkpoint extention/Graph_Embedding/weights/model_epoch950_books_wordNet.pt
+--do_debug --do_train --eval_when_train --do_predict --delete_checkpoin --load_feature --train_path processed_data/v3/train_2.json --dev_path processed_data/v3/test_2.json --test_path processed_data/v3/test_2.json --output_dir outputs_models/model/2 --bert_path /home/cike/hui/Pre-BERTs/bert-base-uncased/uncased_L-12_H-768_A-12 --bert_vocab /home/cike/hui/Pre-BERTs/bert-base-uncased/uncased_L-12_H-768_A-12/vocab.txt --train_batch_size 2 --cpt_per_epoch 2 --gradient_accumulation_steps 1 --num_train_epochs -1 --warmup_epoch 0 --test_batch_size 2 --context_emb sep_bert_graph --label_reps sep --emission proto --similarity dot --ems_scale_r 0.01 --decoder crf -t_scl learn -t_nm norm -lt_nm softmax -t_scl learn --rcnn_checkpoint extention/Graph_Embedding/weights/model_epoch950_books_wordNet.pt
+
 - Execute cross-evaluation script with two params: -[gpu id] -[dataset name]
 
 
@@ -70,6 +86,7 @@ base_data_dir=/your_dir/data/
     - `main.py`: the entry file of the whole project
 
 ### `models`
+[思维导图](https://www.edrawsoft.cn/viewer/public/s/d5b50827142463)
 - Main Model  
     - Sequence Labeler (`few_shot_seq_labeler.py`): a framework that integrates modules below to perform sequence labeling.
 - Modules

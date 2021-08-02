@@ -8,10 +8,9 @@ import os
 import math
 import torch
 import numpy as np
-from utils.graph_util import getGraphMaps, getReviewConceptTriples, rawTriples2index, unique_rows, generate_graph, tokens2unique_nodes   # @jinhui 0731
 
 
-class FewTagLabelWithGraphDataset(data.Dataset):
+class FewRelDataset(data.Dataset):
     """
     FewRel Dataset
     """
@@ -26,12 +25,6 @@ class FewTagLabelWithGraphDataset(data.Dataset):
         self.Q = opt.Q
         self.preprocessor = preprocessor
         self.opt = opt
-
-        # @jinhui for graph
-
-        self.maps = getGraphMaps(maps_root=opt.maps_root)# 获取到word2id的映射关系
-
-
 
     def get_nwp_index(self, word_piece_mark: list) -> torch.Tensor:
         """ get index of non-word-piece tokens, which is used to extract non-wp bert embedding in batch manner """
@@ -100,60 +93,22 @@ class FewTagLabelWithGraphDataset(data.Dataset):
         assert len(labels_index) == self.opt.max_length
         assert len(input_mask) == self.opt.max_length
         assert len(output_mask) == self.opt.max_length
+        return token_ids, wp_mask, segment_ids, labels_index, input_mask, output_mask
 
-
-        # @jinhui 过去当前review中潜在的图结构
-        sg = self.__get_sg__(item)
-        return token_ids, wp_mask, segment_ids, labels_index, input_mask, output_mask, sg
-    def __get_sg__(self, item):
-
-        relation_map = self.maps[0]  # 文件目录 @jinhui 目前是硬绑定
-        concept_map = self.maps[1]  # 来自总的大图
-        unique_nodes_mapping = self.maps[2]  # 被reviewconcept过滤过的
-
-        rawConceptTriples = getReviewConceptTriples(item)  # 获取到全部的三元组 @jinhui 未实现
-        xg = rawTriples2index(rawConceptTriples, self.maps)# word2id
-
-        xg = np.array(xg)  # 这是在大图上的triple
-        # 我们想要获得这篇review的所有tripe 包括conceptNet 和opinion
-        xg = xg[~np.all(xg == 0, axis=1)]  # 只要有人包含index  = 0 要过滤掉，为什么？
-        # 是以大图的id为依据的
-        absent1 = set(xg[:, 0]) - set(unique_nodes_mapping.values())  # 没有的index
-        absent2 = set(xg[:, 2]) - set(unique_nodes_mapping.values())
-        absent = absent1.union(absent2)
-
-        for absent_item in absent:
-            xg = xg[~np.any(xg == absent_item, axis=1)]
-
-        xg[:, 0] = np.vectorize(unique_nodes_mapping.get)(xg[:, 0])  # 拿到在小图上面的index
-        xg[:, 2] = np.vectorize(unique_nodes_mapping.get)(xg[:, 2])
-
-        xg = unique_rows(xg).astype('int64')
-        # if len(xg) > self.opt.maxTriple:
-        #     xg = xg[:self.opt.maxTriple, :]
-
-        sg = generate_graph(xg, len(relation_map))#.to(torch.device('cuda'))
-
-        # make sg.entity to whole seq
-        sg.entity = tokens2unique_nodes(item, self.maps)#index in domain graph
-
-        return sg
-
-    def __additem__(self, d, token_ids, wp_mask, segment_ids, input_mask, output_mask, sg):
+    def __additem__(self, d, token_ids, wp_mask, segment_ids, input_mask, output_mask):
         d['token_ids'].append(token_ids)
         d['wp_mask'].append(wp_mask)
         d['segment_ids'].append(segment_ids)
         d['input_mask'].append(input_mask)
         d['output_mask'].append(output_mask)
-        d["sg"].append(sg)
 
     def __getitem__(self, index):
 
         support_classes = self.classes.copy()
         support_classes.remove("EMPTY")
 
-        support_set = {'token_ids': [], 'wp_mask': [], 'segment_ids': [], 'input_mask': [], 'output_mask': [], "sg":[]}
-        query_set = {'token_ids': [], 'wp_mask': [], 'segment_ids': [], 'input_mask': [], 'output_mask': [], "sg":[]}
+        support_set = {'token_ids': [], 'wp_mask': [], 'segment_ids': [], 'input_mask': [], 'output_mask': []}
+        query_set = {'token_ids': [], 'wp_mask': [], 'segment_ids': [], 'input_mask': [], 'output_mask': []}
         query_label = []
         support_label = []
 
@@ -163,7 +118,7 @@ class FewTagLabelWithGraphDataset(data.Dataset):
                 self.K + self.Q, False)
             count = 0
             for j in indices:
-                token_ids, wp_mask, segment_ids, labels, input_mask, output_mask, sg = self.__getraw__(
+                token_ids, wp_mask, segment_ids, labels, input_mask, output_mask = self.__getraw__(
                     self.examples[class_name][j])
                 token_ids = torch.tensor(token_ids).long()
                 wp_mask = torch.tensor(wp_mask).long()
@@ -172,18 +127,18 @@ class FewTagLabelWithGraphDataset(data.Dataset):
                 input_mask = torch.tensor(input_mask).long()
                 output_mask = torch.tensor(output_mask).long()
                 if count < self.K:
-                    self.__additem__(support_set, token_ids, wp_mask, segment_ids, input_mask, output_mask, sg)
+                    self.__additem__(support_set, token_ids, wp_mask, segment_ids, input_mask, output_mask)
                     support_label.append(labels)
                 else:
-                    self.__additem__(query_set, token_ids, wp_mask, segment_ids, input_mask, output_mask, sg)
+                    self.__additem__(query_set, token_ids, wp_mask, segment_ids, input_mask, output_mask)
                     query_label.append(labels)
                 count += 1
 
-        # add EMPTY 为什么需要额外add
+        # add EMPTY
         indices = np.random.choice(
             list(range(len(self.examples["EMPTY"]))), self.Q, False)
         for j in indices:
-            token_ids, wp_mask, segment_ids, labels, input_mask, output_mask, sg = self.__getraw__(
+            token_ids, wp_mask, segment_ids, labels, input_mask, output_mask = self.__getraw__(
                 self.examples["EMPTY"][j])
             token_ids = torch.tensor(token_ids).long()
             wp_mask = torch.tensor(wp_mask).long()
@@ -192,7 +147,7 @@ class FewTagLabelWithGraphDataset(data.Dataset):
             input_mask = torch.tensor(input_mask).long()
             output_mask = torch.tensor(output_mask).long()
 
-            self.__additem__(query_set, token_ids, wp_mask, segment_ids, input_mask, output_mask, sg)
+            self.__additem__(query_set, token_ids, wp_mask, segment_ids, input_mask, output_mask)
             query_label.append(labels)
 
         return support_set, query_set, support_label, query_label
@@ -202,8 +157,8 @@ class FewTagLabelWithGraphDataset(data.Dataset):
 
 
 def collate_fn(data):#@改 jinghui 因为这里将batch 拉平了，导致后续的处理跟不上
-    batch_support = {'token_ids': [], 'wp_mask': [], 'segment_ids': [], 'input_mask': [], 'output_mask': [], "sg":[]}
-    batch_query = {'token_ids': [], 'wp_mask': [], 'segment_ids': [], 'input_mask': [], 'output_mask': [], "sg": []}
+    batch_support = {'token_ids': [], 'wp_mask': [], 'segment_ids': [], 'input_mask': [], 'output_mask': []}
+    batch_query = {'token_ids': [], 'wp_mask': [], 'segment_ids': [], 'input_mask': [], 'output_mask': []}
     batch_query_labels = []
     batch_support_labels = []
     support_sets, query_sets, support_labels, query_labels = zip(*data)
@@ -218,11 +173,9 @@ def collate_fn(data):#@改 jinghui 因为这里将batch 拉平了，导致后续
         batch_query_labels += query_labels[i]
         batch_support_labels += support_labels[i]
     for k in batch_support:
-        if k != "sg":
-            batch_support[k] = torch.stack(batch_support[k], 0).reshape(batch_size,support_size,-1)# list[30, 128]
+        batch_support[k] = torch.stack(batch_support[k], 0).reshape(batch_size,support_size,-1)# list[30, 128]
     for k in batch_query:
-        if k != "sg":
-            batch_query[k] = torch.stack(batch_query[k], 0).reshape(batch_size,query_size,-1)
+        batch_query[k] = torch.stack(batch_query[k], 0).reshape(batch_size,query_size,-1)
     batch_query_labels = torch.stack(batch_query_labels, 0).reshape(batch_size,query_size,-1)
     batch_support_labels = torch.stack(batch_support_labels, 0).reshape(batch_size,support_size,-1)
 
@@ -256,10 +209,9 @@ class FewShotRawDataLoader():
         for domain_name, domain_data in raw_data.items():
             examples = domain_data# 应该有循环逻辑进行拼接
         trans_mat = self.get_trans_mat(examples)
-        dataset = FewTagLabelWithGraphDataset(examples, preprocessor, opt)
+        dataset = FewRelDataset(examples, preprocessor, opt)
         # if self.debugging:
         #     examples, few_shot_batches = examples[:8], few_shot_batches[:2]
-        # dataset[0]
         data_loader = data.DataLoader(dataset=dataset,
                                       batch_size=batch_size,
                                       shuffle=False,

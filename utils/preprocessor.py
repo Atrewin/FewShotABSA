@@ -354,7 +354,7 @@ def load_feature(path):
 
 def make_preprocessor(opt):
     """ make preprocessor """
-    transformer_style_embs = ['bert', 'sep_bert', 'electra']
+    transformer_style_embs = ['bert', 'sep_bert', 'electra', "bert_graph", "sep_bert_graph"]
 
     ''' select input_builder '''
     if opt.context_emb in transformer_style_embs:

@@ -83,7 +83,7 @@ def main():
         if opt.mask_transition:# 不知道用来干什么的，后面还有蛮多地方用到了
             # opt.train_label_mask = make_label_mask(opt, opt.train_path, sent_label2id)
             # opt.dev_label_mask = make_label_mask(opt, opt.dev_path, sent_label2id)# 这是联合分布矩阵的扩张方式
-            opt.train_trans_mat = [torch.Tensor(item).to(device) for item in train_trans_mat]
+            opt.train_trans_mat = [torch.Tensor(item).to(device) for item in train_trans_mat]#@jinhui 暂时用不上的
             opt.dev_trans_mat = [torch.Tensor(item).to(device) for item in dev_trans_mat]
     else:
         train_data_loader, dev_data_loader = [None] * 2

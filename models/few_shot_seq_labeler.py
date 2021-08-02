@@ -10,7 +10,7 @@ from models.modules.emission_scorer_base import EmissionScorerBase
 from models.modules.transition_scorer import TransitionScorerBase
 from models.modules.seq_labeler import SequenceLabeler
 from models.modules.conditional_random_field import ConditionalRandomField
-
+from torch_geometric.data import Data
 
 class FewShotSeqLabeler(torch.nn.Module):
     def __init__(self,
@@ -33,20 +33,13 @@ class FewShotSeqLabeler(torch.nn.Module):
     # @pysnooper.snoop()+
     def forward(
             self,
-            test_token_ids: torch.Tensor,
-            test_nwp_index: torch.Tensor,
-            test_segment_ids: torch.Tensor,
-            test_input_mask: torch.Tensor,
-            test_output_mask: torch.Tensor,
-            support_token_ids: torch.Tensor,
-            support_nwp_index: torch.Tensor,
-            support_segment_ids: torch.Tensor,
-            support_input_mask: torch.Tensor,
-            support_output_mask: torch.Tensor,
+            support_set,
+            query_set,
             support_label: torch.Tensor,
-            test_label: torch.Tensor,
+            query_label: torch.Tensor,
             epoch_id=0,
     ):
+
         """
         :param test_token_ids: (batch_size, test_len)  #@ (batch_size, query_size, test_len)
         :param test_segment_ids: (batch_size, test_len) #@ (batch_size, query_size, test_len)
@@ -58,26 +51,38 @@ class FewShotSeqLabeler(torch.nn.Module):
         :param support_nwp_index: (batch_size, support_size, support_len)
         :param support_input_mask: (batch_size, support_size, support_len)
         :param support_output_mask: (batch_size, support_size, support_len)
-        :param test_target: index targets (batch_size, test_len)   # (batch_size, query_size, test_len)
-        :param support_target: one-hot targets (batch_size, support_size, support_len, num_tags) # (batch_size, support_size, test_len)
-        :param support_num: (batch_size, 1)
+        :param query_label: index targets (batch_size, test_len)   # (batch_size, query_size, test_len)
+        :param support_label: one-hot targets (batch_size, support_size, support_len, num_tags) # (batch_size, support_size, test_len)
+        for graph
+        :param support_sg: batch_size*support_size*[sg: {entity, edges_index, edges_type, edges_norm}]
+        :param query_sg: batch_size*support_size*[sg: {entity, edges_index, edges_type, edges_norm}]
         :return:
         """
 
+        # test_token_ids = query_set["token_ids"]
+        # test_nwp_index = query_set['wp_mask']
+        # test_segment_ids = query_set['segment_ids']
+        # test_input_mask = query_set['input_mask']
+        test_output_mask = query_set["output_mask"]
+        # support_token_ids = support_set["token_ids"]
+        # support_nwp_index = support_set['wp_mask']
+        # support_segment_ids = support_set['segment_ids']
+        # support_input_mask = support_set['input_mask']
+        support_output_mask = support_set["output_mask"]
+        # support_set_sg = support_set["sg"]
+        # query_set_sg = query_set["sg"]
+
         # reps for tokens: (batch_size, support_size, nwp_sent_len, emb_len)
-        test_reps, support_reps = self.get_context_reps(
-            test_token_ids, test_segment_ids, test_nwp_index, test_input_mask, support_token_ids, support_segment_ids,
-            support_nwp_index, support_input_mask
-        )
+        test_reps, support_reps = self.get_context_reps(support_set, query_set )
         #trans to one hot label (batch_size, support_szie, support_len, num_tag)
         support_label = self.to_one_hot_label(support_label, self.opt.num_tags)
         # calculate emission: shape(batch_size, test_len, no_pad_num_tag)
-        emission = self.emission_scorer(test_reps, support_reps, test_output_mask, support_output_mask, support_label)
+        emission = self.emission_scorer(test_reps, support_reps, query_set["output_mask"], support_set["output_mask"], support_label)
 
         logits = emission
 
         # block pad of label_id = 0, so all label id sub 1. And relu is used to avoid -1 index
-        test_target = torch.nn.functional.relu(test_label - 1)#len = 2 :
+        test_target = torch.nn.functional.relu(query_label - 1)#len = 2 :
 
         loss, prediction = torch.FloatTensor(0).to(test_target.device), None
 
@@ -155,14 +160,8 @@ class FewShotSeqLabeler(torch.nn.Module):
 
     def get_context_reps(
         self,
-            test_token_ids: torch.Tensor,
-            test_segment_ids: torch.Tensor,
-            test_nwp_index: torch.Tensor,
-            test_input_mask: torch.Tensor,
-            support_token_ids: torch.Tensor,
-            support_segment_ids: torch.Tensor,
-            support_nwp_index: torch.Tensor,
-            support_input_mask: torch.Tensor,
+        support_set,
+        query_set,
     ):
         if self.no_embedder_grad:
             self.context_embedder.eval()  # to avoid the dropout effect of reps model
@@ -170,10 +169,7 @@ class FewShotSeqLabeler(torch.nn.Module):
         else:
             self.context_embedder.train()  # to avoid the dropout effect of reps model
             self.context_embedder.requires_grad = True
-        test_reps, support_reps = self.context_embedder(
-            test_token_ids, test_segment_ids, test_nwp_index, test_input_mask, support_token_ids, support_segment_ids,
-            support_nwp_index, support_input_mask
-        )
+        test_reps, support_reps = self.context_embedder(support_set=support_set, query_set=query_set)
         if self.no_embedder_grad:
             test_reps = test_reps.detach()  # detach the reps part from graph
             support_reps = support_reps.detach()  # detach the reps part from graph

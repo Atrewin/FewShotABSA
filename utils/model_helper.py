@@ -6,9 +6,10 @@ import sys
 import torch
 import copy
 import torchcrf
+import torch.nn as nn
 # my staff
 from models.modules.context_embedder_base import BertContextEmbedder, \
-    BertSeparateContextEmbedder, NormalContextEmbedder, BertSchemaContextEmbedder, BertSchemaSeparateContextEmbedder
+    BertSeparateContextEmbedder, NormalContextEmbedder, BertGraphSeparateContextEmbedder, BertCatGraphContextEmbedder
 from models.modules.similarity_scorer_base import MatchingSimilarityScorer, \
     PrototypeSimilarityScorer, ProtoWithLabelSimilarityScorer, TapNetSimilarityScorer, \
     reps_dot, reps_l2_sim, reps_cosine_sim
@@ -45,10 +46,9 @@ def make_model(opt, num_tags, trans_r, id2label=None, random_num_tags=None):
 
     ''' Build context_embedder '''
     if opt.context_emb == 'bert':
-        context_embedder = BertSchemaContextEmbedder(opt=opt) if opt.use_schema else BertContextEmbedder(opt=opt)
+        context_embedder =  BertContextEmbedder(opt=opt)
     elif opt.context_emb == 'sep_bert':
-        context_embedder = BertSchemaSeparateContextEmbedder(opt=opt) if opt.use_schema else \
-            BertSeparateContextEmbedder(opt=opt)
+        context_embedder = BertSeparateContextEmbedder(opt=opt)
     elif opt.context_emb == 'elmo':
         raise NotImplementedError
     elif opt.context_emb == 'glove':
@@ -56,8 +56,16 @@ def make_model(opt, num_tags, trans_r, id2label=None, random_num_tags=None):
         context_embedder.load_embedding()
     elif opt.context_emb == 'raw':
         context_embedder = NormalContextEmbedder(opt=opt, num_token=len(opt.word2id))
+
+    elif opt.context_emb == 'bert_graph':
+        context_embedder = BertCatGraphContextEmbedder(opt=opt)#@jinhui 0731
+        pass
+    elif opt.context_emb == 'sep_bert_graph':
+        context_embedder = BertGraphSeparateContextEmbedder(opt=opt)#@jinhui 0731
+        pass
     else:
         raise TypeError('wrong component type')
+
 
     '''Build emission scorer and similarity scorer '''
     # build scaler
@@ -177,3 +185,10 @@ def get_value_from_order_dict(order_dict, key):
         if key in k:
             return v
     return []
+
+
+def get_linear_layer(layer_size_list):
+    #jinhui 未实现 可复用， 直接针对任务配置
+    layer = nn.Linear(layer_size_list[0], layer_size_list[-1])
+
+    return layer

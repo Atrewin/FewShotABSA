@@ -87,6 +87,11 @@ def train_args(parser):
     group.add_argument("--eval_when_train", default=False, action='store_true',
                        help="Test model found new best model")
 
+    #for graph
+    group.add_argument("--maps_root",default="extention/Graph_Embedding/preprocess_data/books_wordNet", type=str, help="the root you save graph traning maps output")
+    group.add_argument("--rcnn_checkpoint", default="extention/Graph_Embedding/weights/model_epoch950_books_wordNet.pt", type=str, help="the path to you rcnn checkpoint.pt")
+    # group.add_argument("--maxTriple", default=1000, type=int, help="the max edges in one review")
+
     group = parser.add_argument_group('SpaceOptimize')  # Optimize space usage
     group.add_argument('--gradient_accumulation_steps', type=int, default=1,
                        help="Number of updates steps to accumulate before performing a backward/update pass."
@@ -143,7 +148,7 @@ def model_args(parser):
     group.add_argument("--projection_layer", default='none', type=str,
                        choices=['1-mlp', '2-mlp', 'mlp-relu', 'lstm', 'none'], help="select projection layer type")
     group.add_argument("--context_emb", default='bert', type=str,
-                       choices=['bert', 'elmo', 'glove', 'raw', 'sep_bert', 'electra'],
+                       choices=['bert', 'elmo', 'glove', 'raw', 'sep_bert', 'electra', "bert_graph", "sep_bert_graph"],
                        help="select word representation type")
     group.add_argument("--similarity", default='dot', type=str,
                        choices=['cosine', 'dot', 'bi-affine', 'l2'], help="Metric for evaluating 2 tokens.")

@@ -386,25 +386,27 @@ class FewShotTrainer(TrainerBase):
         support_set, query_set, support_label, query_label = batch
         if torch.cuda.is_available():
             for k in support_set:
-                support_set[k] = support_set[k].cuda()
+                if k != "sg":
+                    support_set[k] = support_set[k].cuda()
+                else:
+                    for sg_index in range(len(support_set[k])):
+                        support_set[k][sg_index] = support_set[k][sg_index].cuda()
             for k in query_set:
-                query_set[k] = query_set[k].cuda()
+                if k != "sg":
+                    query_set[k] = query_set[k].cuda()
+                else:
+                    for sg_index in range(len(query_set[k])):
+                        query_set[k][sg_index] = query_set[k][sg_index].cuda()
+
             support_label = support_label.cuda()
             query_label = query_label.cuda()
-
+        # 因为其他的model是没有sg input 的，同时这里没有讲sg的传参扩散，为此这里使用if-else进行分支多态（其他多态：传参多态，虚函数多态, 结构封装多态）
+        # @jinhui 0802 采用数据封装的方式重写的多态问题
         loss = model(
-            query_set["token_ids"],
-            query_set['wp_mask'],
-            query_set['segment_ids'],
-            query_set['input_mask'],
-            query_set["output_mask"],
-            support_set["token_ids"],
-            support_set['wp_mask'],
-            support_set['segment_ids'],
-            support_set['input_mask'],
-            support_set["output_mask"],
-            support_label,
-            query_label,
+            support_set=support_set,
+            query_set=query_set,
+            support_label=support_label,
+            query_label=query_label,
         )
         return loss
 
