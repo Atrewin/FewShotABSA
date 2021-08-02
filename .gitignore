@@ -5,6 +5,9 @@ __pycache__/
 # C extensions
 *.so
 
+extention/Graph_Embedding/preprocess_data
+extention/Graph_Embedding/weights
+
 # Distribution / packaging
 .Python
 baseline/
@@ -82,3 +85,5 @@ result_analysis/
 .DS_store
 check_cache.py
 *.xlsx
+
+
